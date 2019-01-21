@@ -147,7 +147,7 @@ def main():
     client.connect(host=SERVER, user=USER, password=PASSWORD, port=PORT)
     print("Connected to MQTT broker ", SERVER)
     client.set_callback(sub_cb)
-    client.subscribe("otto/#"")
+    client.subscribe("otto/#")
     global lifting
     global door_down
     last_door_down = 1
