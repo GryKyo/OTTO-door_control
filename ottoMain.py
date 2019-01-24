@@ -135,6 +135,7 @@ CLIENT_ID = ubinascii.hexlify(machine.unique_id())
 
 def sub_cb(topic, msg):  # the callback to handle MQTT messages
     print((topic, msg))
+    global cmd_up
     if topic == b"otto/cmd":
         if msg == b"up"
         cmd_up = True
@@ -177,11 +178,11 @@ def main():
             last_lifting = lifting
             last_door_down = door_down
             client.check_msg()
-        except:
-            KeyboardInterrupt
+    except KeyboardInterrupt:
+
         print("Graceful exit by keyboard interrupt")
 
-        finally:
+    finally:
             print("Code stopped, idle now")
 
 
