@@ -128,9 +128,9 @@ connect.do_connect()
 
 #  MQTT server and creds to connect
 SERVER = "m20.cloudmqtt.com"
-USER = "rmfhlxgf"
-PASSWORD = "4e8hGCapvTQv"
-PORT = "14928"
+USER = "XXXXXX"
+PASSWORD = "XXXXXX"
+PORT = "XXXXX"
 CLIENT_ID = ubinascii.hexlify(machine.unique_id())
 
 
