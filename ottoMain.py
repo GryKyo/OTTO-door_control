@@ -2,6 +2,7 @@ import os
 import machine
 from machine import Pin
 import time
+import credentials
 import connect
 from umqtt.simple import MQTTClient
 
