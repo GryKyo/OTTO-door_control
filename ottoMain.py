@@ -184,7 +184,7 @@ def main():
         print("Graceful exit by keyboard interrupt")
 
     finally:
-            print("Code stopped, idle now")
+        print("Code stopped, idle now")
 
 
 if __name__ == '__main__':
