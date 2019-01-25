@@ -1,0 +1,6 @@
+SSID = "this is the WiFi SSID"
+password = "this is the PSK password"
+static = "192.168.2.XXX"
+gateway = "192.168.X.X"
+mask = "255.255.255.0"
+DNS = "1.1.1.1"
