@@ -139,7 +139,7 @@ def sub_cb(topic, msg):  # the callback to handle MQTT messages
     global cmd_up
     if topic == b"otto/cmd":
         if msg == b"up"
-        cmd_up = True
+            cmd_up = True
 
 #  Most of the program is here
 
