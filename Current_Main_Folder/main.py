@@ -138,7 +138,7 @@ def sub_cb(topic, msg):  # the callback to handle MQTT messages
     print((topic, msg))
     global cmd_up
     if topic == b"otto/cmd":
-        if msg == b"up"
+        if msg == b"up":
             cmd_up = True
 
 #  Most of the program is here
@@ -166,13 +166,13 @@ def main():
                 door_down = False
             if lifting != last_lifting:
                 if lifting:
-                entry = time.ticks_ms()
-                   if time.ticks_ms() >= entry + 10000:
-                        timeout = True
-                    if door_up | timeout:
-                        lifting = False
-                        timeout = False
-                        stop_now()
+                    entry = time.ticks_ms()
+                        if time.ticks_ms() >= entry + 10000:
+                            timeout = True
+                        if door_up | timeout:
+                            lifting = False
+                            timeout = False
+                            stop_now()
             if door_down != last_door_down:
                 if door_down:
                     stop_now()
