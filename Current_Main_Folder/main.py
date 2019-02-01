@@ -9,6 +9,7 @@ import time
 import credentials
 import connect
 from umqtt.simple import MQTTClient
+import ujson
 import ubinascii
 
 
@@ -57,17 +58,15 @@ def input_callback(p):
     if p == FOB_A:
         print("input - Fob A")
         button_A()
-
     elif p == FOB_B:
         print("input - Fob B")
         button_B()
-
     elif p == FOB_C:
         print("input - Fob C")
         button_C()
-
     elif p == FOB_D:
-        pass
+        print("input - Fob D")
+        button_D()
     elif p == OPT_1:
         if not OPT_1.value():
             opto_1 = True
@@ -83,29 +82,18 @@ def input_callback(p):
             opto_2 = False
             print("opto_2 = False")
 
-# set up some INPUT pins and IRQ triggers to catch inputs
+# set up all INPUT pins and IRQ triggers to catch inputs
 FOB_A = machine.Pin(16, machine.Pin.IN)
-
 FOB_A.irq(trigger=Pin.IRQ_RISING, handler=input_callback)
-
 FOB_B = machine.Pin(4, machine.Pin.IN)
-
 FOB_B.irq(trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING, handler=input_callback)
-
 FOB_C = machine.Pin(0, machine.Pin.IN)
-
 FOB_C.irq(trigger=Pin.IRQ_RISING, handler=input_callback)
-
 FOB_D = machine.Pin(2, machine.Pin.IN)
-
 FOB_D.irq(trigger=Pin.IRQ_RISING, handler=input_callback)
-
 OPT_1 = machine.Pin(12, machine.Pin.IN)
-
 OPT_1.irq(trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING, handler=input_callback)
-
 OPT_2 = machine.Pin(13, machine.Pin.IN)
-
 OPT_2.irq(trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING, handler=input_callback)
 
 
@@ -122,7 +110,7 @@ def button_A():
             lift_now()
 
 
-
+# door controls mostly related to BUTTON A on the key fob
 # how to stop the door once moving
 def stop_now():
     global lifting
@@ -136,7 +124,6 @@ def stop_now():
         if time.ticks_ms() >= entry + 500:
             RLY_STOP.value(1)
 
-
 # move the door upwards
 def lift_now():
     entry = time.ticks_ms()
@@ -145,13 +132,12 @@ def lift_now():
         if time.ticks_ms() >= entry + 500:
             RLY_UP.value(1)
 
-
+#  what to do if fob BUTTON B is pressed - mostly lowering door
 def button_B():
     global lifting
     global lowering
     print("Lower command received")
     entry = time.ticks_ms()
-
     if lifting:  # Stop first if the door is lifting
         lifting = False  # Stopped lifting
         print("Halting door to change direction")
@@ -159,8 +145,7 @@ def button_B():
         while RLY_STOP.value():
             if time.ticks_ms() >= entry + 500:
                 RLY_STOP.value(1)
-
-    if FOB_B.value() | cmd_down:
+    if FOB_B.value() | cmd_down:  # These conditions to lower the door
         lowering = True
         RLY_DOWN.value(0)
     elif not FOB_B.value():
@@ -170,11 +155,21 @@ def button_B():
         lowering = False
         RLY_DOWN.value(1)
 
+#  what to do if BUTTON C is pressed - mostly stopping evrything
 def button_C():
   stop_now()
   lifting = False
   lowering = False
   print("button C funciton called")
+
+
+#  what to do if fob BUTTON D is pressed - just sounding the beacon
+def button_D():
+    if FOB_D.value(1):
+        RLY_BEEPER.value(0)
+    else:
+        RLY_BEEPER.value(1)
+
 
 # run WiFi connect script
 connect.do_connect()
@@ -198,6 +193,19 @@ def sub_cb(topic, msg):
         if msg == b"up":
           cmd_up = True
           button_A()
+    elif topic == b"otto/rfid":
+        print((topic, msg))
+        raw = str(msg)
+        parsed_msg = ujson.loads(msg)
+        log_data = parsed_msg["username"]
+        response = urequests.get('https://docs.google.com/forms/d/e/1FAIpQLSfdoHEkvjfmqdXzLFD07HeueWl5TWe60gpaeDGUUrpRF3J9Lw/formResponse?entry.724982636=', log_data)
+        access = parsed_msg["isKnown"]
+        print("This tag is known is ", isKnown)
+        if access == "true":
+            print("...and access is granted")
+            button_A()
+        elif access == "false":
+            print("...and access is denied")
 
 
   #  Most of the program is here
