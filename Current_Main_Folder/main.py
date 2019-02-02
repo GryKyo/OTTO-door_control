@@ -196,8 +196,8 @@ def sub_cb(topic, msg):
     elif topic == b"otto/rfid":
         print((topic, msg))
         raw = str(msg)
-        parsed_msg = ujson.loads(msg)
-        log_data = parsed_msg["username"]
+        parsed_msg = ujson.loads(msg) # convert JSON to a type DICT
+        log_data = parsed_msg["username"]  # get some data from the msg
         response = urequests.get('https://docs.google.com/forms/d/e/1FAIpQLSfdoHEkvjfmqdXzLFD07HeueWl5TWe60gpaeDGUUrpRF3J9Lw/formResponse?entry.724982636=', log_data)
         access = parsed_msg["isKnown"]
         print("This tag is known is ", isKnown)
