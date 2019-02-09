@@ -1,16 +1,13 @@
-
-
-
-
+# Modules needed to run the script
 import os
-import machine
-from machine import Pin
+from machine import *
 import time
 import credentials
 import connect
 from umqtt.simple import MQTTClient
 import ujson
 import ubinascii
+import urequests
 
 
 # some variables which may be called as Globals
@@ -28,24 +25,19 @@ timeout = False # a timer used to stop the door if opto fails
 
 
 # set up some OUTPUT pins
-#ONBOARD_LED = machine.Pin(22, machine.Pin.OUT)
+ONBOARD_LED = machine.Pin(22, machine.Pin.OUT)
+ONBOARD_LED.value(1)
 
-#ONBOARD_LED.value(1)
-
-RLY_UP = machine.Pin(22, machine.Pin.OUT)
-
+RLY_UP = machine.Pin(25, machine.Pin.OUT)
 RLY_UP.value(1)
 
-RLY_STOP = machine.Pin(32, machine.Pin.OUT)
-
+RLY_STOP = machine.Pin(33, machine.Pin.OUT)
 RLY_STOP.value(1)
 
-RLY_DOWN = machine.Pin(21, machine.Pin.OUT)
-
+RLY_DOWN = machine.Pin(32, machine.Pin.OUT)
 RLY_DOWN.value(1)
 
-RLY_BEEPER = machine.Pin(33, machine.Pin.OUT)
-
+RLY_BEEPER = machine.Pin(34, machine.Pin.OUT)
 RLY_BEEPER.value(1)
 
 
@@ -81,6 +73,8 @@ def input_callback(p):
         elif OPT_2.value():
             opto_2 = False
             print("opto_2 = False")
+    elif p == RFID_DIO.value():
+        button_A()
 
 # set up all INPUT pins and IRQ triggers to catch inputs
 FOB_A = machine.Pin(16, machine.Pin.IN)
@@ -90,11 +84,13 @@ FOB_B.irq(trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING, handler=input_callback)
 FOB_C = machine.Pin(0, machine.Pin.IN)
 FOB_C.irq(trigger=Pin.IRQ_RISING, handler=input_callback)
 FOB_D = machine.Pin(2, machine.Pin.IN)
-FOB_D.irq(trigger=Pin.IRQ_RISING, handler=input_callback)
+FOB_D.irq(trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING, handler=input_callback)
 OPT_1 = machine.Pin(12, machine.Pin.IN)
 OPT_1.irq(trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING, handler=input_callback)
-OPT_2 = machine.Pin(13, machine.Pin.IN)
+OPT_2 = machine.Pin(14, machine.Pin.IN)
 OPT_2.irq(trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING, handler=input_callback)
+RFID_DIO = machine.Pin(26, machine.Pin.IN)
+RFID_DIO.irq(trigger=Pin.IRQ_RISING, handler=input_callback)
 
 
 # what to do if Button A is pressed on fob
@@ -145,15 +141,11 @@ def button_B():
         while RLY_STOP.value():
             if time.ticks_ms() >= entry + 500:
                 RLY_STOP.value(1)
-    if FOB_B.value() | cmd_down:  # These conditions to lower the door
+    if FOB_B.value():  # These conditions to lower the door
         lowering = True
-        RLY_DOWN.value(0)
     elif not FOB_B.value():
         lowering = False
-        RLY_DOWN.value(1)
-    elif not cmd_down:
-        lowering = False
-        RLY_DOWN.value(1)
+
 
 #  what to do if BUTTON C is pressed - mostly stopping evrything
 def button_C():
@@ -171,14 +163,10 @@ def button_D():
         RLY_BEEPER.value(1)
 
 
-# run WiFi connect script
+# run WiFi connect script - credentials are externally stored
 connect.do_connect()
 
-#  MQTT server and creds to connect
-SERVER = "m20.cloudmqtt.com"
-USER = "rmfhlxgf"
-PASSWORD = "4e8hGCapvTQv"
-PORT = "14928"
+#  MQTT server and creds to connect - credentials are externally stored
 CLIENT_ID = ubinascii.hexlify(machine.unique_id())
 
 
@@ -187,20 +175,26 @@ CLIENT_ID = ubinascii.hexlify(machine.unique_id())
 def sub_cb(topic, msg):
     print((topic, msg))
     global cmd_up
+    global cmd_down
     global incoming_msg
     incoming_msg = str(msg)
     if topic == b"otto/cmd":
         if msg == b"up":
           cmd_up = True
           button_A()
+        if msg == b"LowerButtonDown":  # These conditions to lower the door
+            cmd_down = True
+        if msg == b"LowerButtonUp":  # These conditions to lower the door
+            cmd_down = False
     elif topic == b"otto/rfid":
-        print((topic, msg))
+        #print((topic, msg))
         raw = str(msg)
-        parsed_msg = ujson.loads(msg) # convert JSON to a type DICT
+        parsed_msg = ujson.loads(raw) # convert JSON to a type DICT
+        print("Parsed JSON : ", parsed_msg)
         log_data = parsed_msg["username"]  # get some data from the msg
-        response = urequests.get('https://docs.google.com/forms/d/e/1FAIpQLSfdoHEkvjfmqdXzLFD07HeueWl5TWe60gpaeDGUUrpRF3J9Lw/formResponse?entry.724982636=', log_data)
+        response = urequests.get(credentials.google_string, log_data)
         access = parsed_msg["isKnown"]
-        print("This tag is known is ", isKnown)
+        print("This tag is known, it is ", access)
         if access == "true":
             print("...and access is granted")
             button_A()
@@ -231,19 +225,23 @@ def main(server=SERVER, port=PORT, user=USER, password=PASSWORD):
           door_down = True
         else:
             door_down = False
+        if lifting | lowering:
+            RLY_BEEPER.value(0)
+        if lifting:
+            RLY_UP.value(0)
+        else:
+            RLY_UP.value(1)
+        if lwering:
+            RLY_DOWN.value(0)
+        else:
+            RLY_DOWN.value(1)
         if lifting != last_lifting:
           if lifting:
             entry = time.ticks_ms()
-            if time.ticks_ms() >= entry + 10000:
-              timeout = True
-              print("timeout!")
-              if door_up | timeout:
-                lifting = False
-                timeout = False
-                stop_now()
-            if door_down != last_door_down:
-              if door_down:
-                stop_now()
+        if lifting and (time.ticks_ms() >= entry + 7500):
+          timeout = True
+          lifting = False
+          print("timeout!")
         if incoming_msg != blank_incoming_msg:
           client.publish(b"otto/stat", b"Got a new message")
         last_lifting = lifting
