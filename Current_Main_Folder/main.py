@@ -193,22 +193,22 @@ def sub_cb(topic, msg):
         if msg == b"LowerButtonUp":  # These conditions to lower the door
             cmd_down = False
     elif topic == b"otto/rfid":
-        #print((topic, msg))
-        #raw = str(msg)
         parsed_msg = ujson.loads(msg) # convert JSON to a type DICT
         print("Parsed JSON : ", parsed_msg)
         if parsed_msg["type"] == "heartbeat":
           return None
-        log_data = parsed_msg["username"]  # get some data from the msg
-        #response = urequests.get(credentials.google_string + str(log_data))
+        if parsed_msg["type"] == "boot":
+          return None
         access = parsed_msg["isKnown"]
-        print("This tag is known, it is ", log_data)
+        print("This tag is known, it is ", parsed_msg["username"])
         if access == "true":
             print("...and access is granted")
             button_A()
         elif access == "false":
             print("...and access is denied")
-        gc.collect()
+        log_data = parsed_msg["username"]  # get some data from the msg
+        response = urequests.get(credentials.google_string + str(log_data)) # Post to log file on Google Drive
+        response.close()
 
 client = MQTTClient(CLIENT_ID, credentials.SERVER, credentials.PORT, credentials.USER, credentials.PASSWORD)
 client.set_callback(sub_cb)
@@ -261,6 +261,7 @@ finally:
 #  run the main module
 #if __name__ == '__main__':
 #    main()
+
 
 
 
