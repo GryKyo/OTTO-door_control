@@ -1,7 +1,6 @@
 # Modules needed to run the script
 import os
-import machine
-from machine import Pin
+from machine import *
 import time
 import credentials
 import connect
@@ -13,18 +12,16 @@ import urequests
 
 # some variables which may be called as Globals
 lifting = False  # while the door is moving upwards
-last_lifting = False  #  temp store lifting state leaving loop
 lowering = False  # while the door is moving downwards
 opto_1 = False  # flag set by interrupt on rising or falling value
 opto_2 = False  # flag set by interrupt on rising or falling value
 door_up = False  # main function must refresh these values "while True"
 door_down = False  # main function must refresh these values "while True"
 cmd_down = False  # a flag used to see if a "dead-man" MQTT signal is present to lower the door
-cmd_down = False  # a flag used to see if a "dead-man" MQTT signal is present to lower the door
 incoming_msg = "" # empty string until we use it later...
 blank_incoming_msg = "" # empty string until we use it later...
 timeout = False # a timer used to stop the door if opto fails
-response = ""
+
 
 
 # set up some OUTPUT pins
@@ -40,7 +37,7 @@ RLY_STOP.value(1)
 RLY_DOWN = machine.Pin(32, machine.Pin.OUT)
 RLY_DOWN.value(1)
 
-RLY_BEEPER = machine.Pin(21, machine.Pin.OUT)
+RLY_BEEPER = machine.Pin(34, machine.Pin.OUT)
 RLY_BEEPER.value(1)
 
 
@@ -88,9 +85,9 @@ FOB_C = machine.Pin(0, machine.Pin.IN)
 FOB_C.irq(trigger=Pin.IRQ_RISING, handler=input_callback)
 FOB_D = machine.Pin(2, machine.Pin.IN)
 FOB_D.irq(trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING, handler=input_callback)
-OPT_1 = machine.Pin(12, machine.Pin.IN, machine.Pin.PULL_UP)
+OPT_1 = machine.Pin(12, machine.Pin.IN)
 OPT_1.irq(trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING, handler=input_callback)
-OPT_2 = machine.Pin(14, machine.Pin.IN, machine.Pin.PULL_UP)
+OPT_2 = machine.Pin(14, machine.Pin.IN)
 OPT_2.irq(trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING, handler=input_callback)
 RFID_DIO = machine.Pin(26, machine.Pin.IN)
 RFID_DIO.irq(trigger=Pin.IRQ_RISING, handler=input_callback)
@@ -103,7 +100,7 @@ def button_A():
     if lifting:  # button_A stops lifting if already started
         stop_now()
         print("Stopping lifting now by button A")
-    elif not lifting and not door_up:  # DON't if we are fully open
+    elif not lifting:  # DON't if we are fully open
             print("Door ready to lift, Button A, lifting now")
             lifting = True
             lift_now()
@@ -141,21 +138,17 @@ def button_B():
         lifting = False  # Stopped lifting
         print("Halting door to change direction")
         RLY_STOP.value(0)
-        while not RLY_STOP.value():
+        while RLY_STOP.value():
             if time.ticks_ms() >= entry + 500:
                 RLY_STOP.value(1)
     if FOB_B.value():  # These conditions to lower the door
-        RLY_DOWN.value(0)
         lowering = True
     elif not FOB_B.value():
-        RLY_DOWN.value(1)
         lowering = False
 
 
 #  what to do if BUTTON C is pressed - mostly stopping evrything
 def button_C():
-  global lifting
-  global lowering
   stop_now()
   lifting = False
   lowering = False
@@ -187,6 +180,7 @@ def sub_cb(topic, msg):
     incoming_msg = str(msg)
     if topic == b"otto/cmd":
         if msg == b"up":
+          cmd_up = True
           button_A()
         if msg == b"LowerButtonDown":  # These conditions to lower the door
             cmd_down = True
@@ -194,73 +188,70 @@ def sub_cb(topic, msg):
             cmd_down = False
     elif topic == b"otto/rfid":
         #print((topic, msg))
-        #raw = str(msg)
-        parsed_msg = ujson.loads(msg) # convert JSON to a type DICT
+        raw = str(msg)
+        parsed_msg = ujson.loads(raw) # convert JSON to a type DICT
         print("Parsed JSON : ", parsed_msg)
-        if parsed_msg["type"] == "heartbeat":
-          return None
         log_data = parsed_msg["username"]  # get some data from the msg
-        #response = urequests.get(credentials.google_string + str(log_data))
+        response = urequests.get(credentials.google_string, log_data)
         access = parsed_msg["isKnown"]
-        print("This tag is known, it is ", log_data)
+        print("This tag is known, it is ", access)
         if access == "true":
             print("...and access is granted")
             button_A()
         elif access == "false":
             print("...and access is denied")
-        gc.collect()
 
-client = MQTTClient(CLIENT_ID, credentials.SERVER, credentials.PORT, credentials.USER, credentials.PASSWORD)
-client.set_callback(sub_cb)
-client.connect()
-print("Connected to MQTT broker ", credentials.SERVER)
-client.subscribe(b"otto/#")
-client.publish(b"otto/stat", b"Client is subscribed to topic otto/stat")
 
-#  Looping forever now
-#def main():
-
-try:
-  while True:
-    response  = ""
-    if opto_1 and not opto_2:  #  This is the open/closed logic
-      door_up = True 
-    else:
-      door_up = False
-    if not opto_1 and not opto_2:
-      door_down = True
-    else:
-        door_down = False
-    if not door_down:  #  This controls the lowering signal
-        if cmd_down or lowering:
-            RLY_DOWN.value(0)
+  #  Most of the program is here
+def main(server=credentials.SERVER, port=credentials.PORT, user=credentials.USER, password=credentials.PASSWORD):
+    client = MQTTClient(CLIENT_ID, server, port, user, password)
+    client.set_callback(sub_cb)
+    client.connect()
+    print("Connected to MQTT broker ", SERVER)
+    client.subscribe("otto/cmd")
+    global lifting
+    global door_down
+    global incoming_msg
+    global blank_incoming_msg
+    last_door_down = 1
+    last_lifting = 0
+    try:
+      while True:
+        if opto_1 and not opto_2:
+          door_up = True
         else:
-            RLY_DOWN.value(1)
-    if lifting or lowering:
-        RLY_BEEPER.value(0)
-    else:
-        RLY_BEEPER.value(1)
-    if lifting != last_lifting:
-      if lifting == True:
-        start_timing = time.ticks_ms()
-    if lifting and (time.ticks_ms() >= start_timing + 7500):
-      stop_now()
-      print("timeout!")
-    last_lifting = lifting
-    last_door_down = door_down
-    incoming_msg = ""
-    blank_incoming_msg = ""
-    client.check_msg()
-except KeyboardInterrupt:
-  print("Graceful exit by keyboard interrupt")
-  client.publish(b"otto/stat", b"Graceful exit by keyboard interrupt")
-finally:
-  print("Code crashed, idle now")
-  client.publish(b"otto/stat", b"Code stopped, ESP32 idle now")
+          door_up = False
+        if not opto_1 and not opto_2:
+          door_down = True
+        else:
+            door_down = False
+        if lifting | lowering:
+            RLY_BEEPER.value(0)
+        else:
+            RLY_BEEPER.value(1)
+        if lifting != last_lifting:
+          if lifting:
+            entry = time.ticks_ms()
+        if lifting and (time.ticks_ms() >= entry + 7500):
+          timeout = True
+          lifting = False
+          print("timeout!")
+        if incoming_msg != blank_incoming_msg:
+          client.publish(b"otto/stat", b"Got a new message")
+        last_lifting = lifting
+        last_door_down = door_down
+        incoming_msg = ""
+        blank_incoming_msg = ""
+        client.check_msg()
+
+
+    except KeyboardInterrupt:
+      print("Graceful exit by keyboard interrupt")
+      client.publish(b"otto/stat", b"Graceful exit by keyboard interrupt")
+    finally:
+      print("Code crashed, idle now")
+      client.publish(b"otto/stat", b"Code stopped, ESP32 idle now")
 
 #  run the main module
-#if __name__ == '__main__':
-#    main()
-
-
-
+if __name__ == '__main__':
+    main()
