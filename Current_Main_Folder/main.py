@@ -15,6 +15,7 @@ import urequests
 lifting = False  # while the door is moving upwards
 last_lifting = False  #  temp store lifting state leaving loop
 lowering = False  # while the door is moving downwards
+last_lowering = False #  temp store lowering state leaving loop
 opto_1 = False  # flag set by interrupt on rising or falling value
 opto_2 = False  # flag set by interrupt on rising or falling value
 door_up = False  # main function must refresh these values "while True"
@@ -30,23 +31,17 @@ response = ""
 # set up some OUTPUT pins
 ONBOARD_LED = machine.Pin(22, machine.Pin.OUT)
 ONBOARD_LED.value(1)
-
 RLY_UP = machine.Pin(25, machine.Pin.OUT)
 RLY_UP.value(1)
-
 RLY_STOP = machine.Pin(33, machine.Pin.OUT)
 RLY_STOP.value(1)
-
 RLY_DOWN = machine.Pin(32, machine.Pin.OUT)
 RLY_DOWN.value(1)
-
 RLY_BEEPER = machine.Pin(21, machine.Pin.OUT)
 RLY_BEEPER.value(1)
 
 
-
-
-# handle interrupt requests from input Pins
+# handle interrupt requests from the input Pins
 def input_callback(p):
     global opto_1
     global opto_2
@@ -102,34 +97,11 @@ def button_A():
     global lowering
     if lifting:  # button_A stops lifting if already started
         stop_now()
-        print("Stopping lifting now by button A")
+        print("Stop lifting now - button A")
     elif not lifting and not door_up:  # DON't if we are fully open
             print("Door ready to lift, Button A, lifting now")
             lifting = True
             lift_now()
-
-
-# door controls mostly related to BUTTON A on the key fob
-# how to stop the door once moving
-def stop_now():
-    global lifting
-    global lowering
-    print("Stop command -stop_now function")
-    lifting = False
-    lowering = False
-    entry = time.ticks_ms()
-    RLY_STOP.value(0)
-    while not RLY_STOP.value():
-        if time.ticks_ms() >= entry + 500:
-            RLY_STOP.value(1)
-
-# move the door upwards
-def lift_now():
-    entry = time.ticks_ms()
-    RLY_UP.value(0)
-    while not RLY_UP.value():
-        if time.ticks_ms() >= entry + 500:
-            RLY_UP.value(1)
 
 #  what to do if fob BUTTON B is pressed - mostly lowering door
 def button_B():
@@ -145,12 +117,9 @@ def button_B():
             if time.ticks_ms() >= entry + 500:
                 RLY_STOP.value(1)
     if FOB_B.value():  # These conditions to lower the door
-        RLY_DOWN.value(0)
         lowering = True
     elif not FOB_B.value():
-        RLY_DOWN.value(1)
         lowering = False
-
 
 #  what to do if BUTTON C is pressed - mostly stopping evrything
 def button_C():
@@ -161,7 +130,6 @@ def button_C():
   lowering = False
   print("button C funciton called")
 
-
 #  what to do if fob BUTTON D is pressed - just sounding the beacon
 def button_D():
     if FOB_D.value(1):
@@ -169,30 +137,59 @@ def button_D():
     else:
         RLY_BEEPER.value(1)
 
+# door controls mostly related to BUTTON A on the key fob
+# how to stop the door once moving
+def stop_now():
+    global lifting
+    global lowering
+    print("Stop command -stop_now function")
+    client.publish(b"otto/stat", b"stop")
+    lifting = False
+    lowering = False
+    entry = time.ticks_ms()
+    RLY_STOP.value(0)
+    while not RLY_STOP.value():
+        if time.ticks_ms() >= entry + 500:
+            RLY_STOP.value(1)
 
-# run WiFi connect script - credentials are externally stored
-connect.do_connect()
+# move the door upwards
+def lift_now():
+    if not door_up:
+      entry = time.ticks_ms()
+      RLY_UP.value(0)
+      while not RLY_UP.value():
+          if time.ticks_ms() >= entry + 500:
+              RLY_UP.value(1)
 
-#  MQTT server and creds to connect - credentials are externally stored
+# Ready to hit the internet, find MQTT broker and do stuff
+
+connect.do_connect() # run WiFi connect script
+# credentials are externally stored
+
+
+#  MQTT unique ID and creds to connect - credentials are externally stored
 CLIENT_ID = ubinascii.hexlify(machine.unique_id()) # CLIENT_ID is unique & local
 
 
-
-# the callback to handle MQTT messages
+# a callback function to handle inbound MQTT messages
 def sub_cb(topic, msg):
     print((topic, msg))
     global cmd_up
     global cmd_down
-    global incoming_msg
-    incoming_msg = str(msg)
-    if topic == b"otto/cmd":
+    if topic == b"otto/cmd": # this topic receives action commands
         if msg == b"up":
           button_A()
+        if msg == b"stop":
+          stop_now()
         if msg == b"LowerButtonDown":  # These conditions to lower the door
             cmd_down = True
+            print("cmd_down is : ", cmd_down)
+            client.publish(b"otto/stat", "lowering") # broadcast that we are lowering the door
         if msg == b"LowerButtonUp":  # These conditions to lower the door
             cmd_down = False
-    elif topic == b"otto/rfid":
+            stop_now()
+            print("cmd_down is : ", cmd_down)
+    elif topic == b"otto/rfid": # This topic receives a json object from the RFID
         parsed_msg = ujson.loads(msg) # convert JSON to a type DICT
         print("Parsed JSON : ", parsed_msg)
         if parsed_msg["type"] == "heartbeat":
@@ -218,20 +215,18 @@ client.subscribe(b"otto/#")
 client.publish(b"otto/stat", b"Client is subscribed to topic otto/stat")
 
 #  Looping forever now
-#def main():
-
 try:
   while True:
     response  = ""
     if opto_1 and not opto_2:  #  This is the open/closed logic
-      door_up = True 
+      door_up = True
     else:
       door_up = False
     if not opto_1 and not opto_2:
       door_down = True
     else:
         door_down = False
-    if not door_down:  #  This controls the lowering signal
+    if not door_down:  #  This controls the lowering signal - "deadman so must be in loop"
         if cmd_down or lowering:
             RLY_DOWN.value(0)
         else:
@@ -240,28 +235,25 @@ try:
         RLY_BEEPER.value(0)
     else:
         RLY_BEEPER.value(1)
-    if lifting != last_lifting:
-      if lifting == True:
+    if lifting != last_lifting: # detect state change to broadcast the change
+      if lifting:
         start_timing = time.ticks_ms()
+        client.publish(b"otto/stat", b"lifting")
     if lifting and (time.ticks_ms() >= start_timing + 7500):
       stop_now()
       print("timeout!")
+    if lowering != last_lowering: # detect state change to broadcast the change
+      if lowering:
+        client.publish(b"otto/stat", b"lowering")
     last_lifting = lifting
+    last_lowering = lowering
     last_door_down = door_down
-    incoming_msg = ""
-    blank_incoming_msg = ""
+    last_door_up = door_up
     client.check_msg()
 except KeyboardInterrupt:
   print("Graceful exit by keyboard interrupt")
   client.publish(b"otto/stat", b"Graceful exit by keyboard interrupt")
 finally:
-  print("Code crashed, idle now")
+  print("Code stopped, idle now")
   client.publish(b"otto/stat", b"Code stopped, ESP32 idle now")
-
-#  run the main module
-#if __name__ == '__main__':
-#    main()
-
-
-
 
