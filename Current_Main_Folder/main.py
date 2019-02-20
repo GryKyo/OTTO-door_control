@@ -19,7 +19,9 @@ last_lowering = False #  temp store lowering state leaving loop
 opto_1 = False  # flag set by interrupt on rising or falling value
 opto_2 = False  # flag set by interrupt on rising or falling value
 door_up = False  # main function must refresh these values "while True"
+last_door_up = False # temp store open/not open state leaving loop
 door_down = False  # main function must refresh these values "while True"
+last_door_down = False # temp store closed/not closed state leaving loop
 cmd_down = False  # a flag used to see if a "dead-man" MQTT signal is present to lower the door
 cmd_down = False  # a flag used to see if a "dead-man" MQTT signal is present to lower the door
 incoming_msg = "" # empty string until we use it later...
@@ -37,7 +39,7 @@ RLY_STOP = machine.Pin(33, machine.Pin.OUT)
 RLY_STOP.value(1)
 RLY_DOWN = machine.Pin(32, machine.Pin.OUT)
 RLY_DOWN.value(1)
-RLY_BEEPER = machine.Pin(21, machine.Pin.OUT)
+RLY_BEEPER = machine.Pin(26, machine.Pin.OUT)
 RLY_BEEPER.value(1)
 
 
@@ -57,18 +59,21 @@ def input_callback(p):
     elif p == FOB_D:
         print("input - Fob D")
         button_D()
+    elif p == RFID_DIO:
+        print("RFID reader DIO backup")
+        button_A()
     elif p == OPT_1:
-        if not OPT_1.value():
+        if OPT_1.value():
             opto_1 = True
             print("opto_1 = True")
-        elif OPT_1.value():
+        elif not OPT_1.value():
             opto_1 = False
             print("opto_1 = False")
     elif p == OPT_2:
-        if not OPT_2.value():
+        if OPT_2.value():
             opto_2 = True
             print("opto_2 = True")
-        elif OPT_2.value():
+        elif not OPT_2.value():
             opto_2 = False
             print("opto_2 = False")
     elif p == RFID_DIO.value():
@@ -87,7 +92,7 @@ OPT_1 = machine.Pin(12, machine.Pin.IN, machine.Pin.PULL_UP)
 OPT_1.irq(trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING, handler=input_callback)
 OPT_2 = machine.Pin(14, machine.Pin.IN, machine.Pin.PULL_UP)
 OPT_2.irq(trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING, handler=input_callback)
-RFID_DIO = machine.Pin(26, machine.Pin.IN)
+RFID_DIO = machine.Pin(27, machine.Pin.IN, machine.Pin.PULL_UP)
 RFID_DIO.irq(trigger=Pin.IRQ_RISING, handler=input_callback)
 
 
@@ -142,7 +147,7 @@ def button_D():
 def stop_now():
     global lifting
     global lowering
-    print("Stop command -stop_now function")
+    print("Stopping now - many reasons!")
     client.publish(b"otto/stat", b"stop")
     lifting = False
     lowering = False
@@ -181,26 +186,26 @@ def sub_cb(topic, msg):
           button_A()
         if msg == b"stop":
           stop_now()
-        if msg == b"LowerButtonDown":  # These conditions to lower the door
+        if msg == b"LowerButtonDown":  # like a "key down" stroke
             cmd_down = True
             print("cmd_down is : ", cmd_down)
             client.publish(b"otto/stat", "lowering") # broadcast that we are lowering the door
-        if msg == b"LowerButtonUp":  # These conditions to lower the door
+        if msg == b"LowerButtonUp":  # like a "key up" stroke
             cmd_down = False
             stop_now()
             print("cmd_down is : ", cmd_down)
     elif topic == b"otto/rfid": # This topic receives a json object from the RFID
         parsed_msg = ujson.loads(msg) # convert JSON to a type DICT
         print("Parsed JSON : ", parsed_msg)
-        if parsed_msg["type"] == "heartbeat":
+        if parsed_msg["type"] == "heartbeat": # ignore this, don't crash!
           return None
-        if parsed_msg["type"] == "boot":
+        if parsed_msg["type"] == "boot": # ignore this, don't crash!
           return None
-        access = parsed_msg["isKnown"]
+        access = parsed_msg["isKnown"]  #  this is the key for access/no access
         print("This tag is known, it is ", parsed_msg["username"])
         if access == "true":
             print("...and access is granted")
-            button_A()
+            button_A()  #  open or stop lifting the door using RFID & MQTT
         elif access == "false":
             print("...and access is denied")
         log_data = parsed_msg["username"]  # get some data from the msg
@@ -218,19 +223,19 @@ client.publish(b"otto/stat", b"Client is subscribed to topic otto/stat")
 try:
   while True:
     response  = ""
-    if opto_1 and not opto_2:  #  This is the open/closed logic
+    if not opto_1 and opto_2:  #  This is the open/closed logic
       door_up = True
     else:
       door_up = False
-    if not opto_1 and not opto_2:
+    if opto_1 and opto_2:
       door_down = True
     else:
         door_down = False
-    if not door_down:  #  This controls the lowering signal - "deadman so must be in loop"
-        if cmd_down or lowering:
-            RLY_DOWN.value(0)
-        else:
-            RLY_DOWN.value(1)
+    if cmd_down or lowering:   #  This controls the lowering signal - "deadman so must be in loop"
+      if not door_down:
+          RLY_DOWN.value(0)
+    else:
+        RLY_DOWN.value(1)
     if lifting or lowering:
         RLY_BEEPER.value(0)
     else:
@@ -239,12 +244,18 @@ try:
       if lifting:
         start_timing = time.ticks_ms()
         client.publish(b"otto/stat", b"lifting")
-    if lifting and (time.ticks_ms() >= start_timing + 7500):
-      stop_now()
-      print("timeout!")
     if lowering != last_lowering: # detect state change to broadcast the change
       if lowering:
         client.publish(b"otto/stat", b"lowering")
+    if lifting and (time.ticks_ms() >= start_timing + 7500):
+      stop_now()
+      print("timeout!")
+    if door_down != last_door_down:
+        if door_down:  # the door is closed, stop closing!
+            stop_now()
+    if door_up != last_door_up:
+        if door_up:   #  the door is fully up, stop lifting!
+            stop_now()
     last_lifting = lifting
     last_lowering = lowering
     last_door_down = door_down
